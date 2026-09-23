@@ -116,6 +116,8 @@
   .card .card-sub{ color:var(--ink-soft); font-style:italic; font-size:13.5px; margin:0 0 14px 40px; }
 
   .field{ margin-bottom:18px; }
+  .field-row{ display:flex; gap:16px; }
+  .field-row > .field{ flex:1; min-width:0; }
   .field label{
     display:block; font-weight:600; font-size:14.5px; color:var(--ink);
     margin-bottom:6px;
@@ -174,6 +176,18 @@
     font-size:14px; font-weight:600; cursor:pointer; margin-bottom:18px;
   }
 
+  /* ---------- familia y personas significativas ---------- */
+  .fam-entry{
+    border:1.5px dashed var(--line); border-radius:10px;
+    padding:14px 14px 2px; margin-bottom:16px; position:relative;
+  }
+  .fam-entry .fam-title{ font-weight:bold; color:var(--accent, var(--purple)); margin-bottom:8px; font-size:14px;}
+  .fam-remove{
+    position:absolute; top:10px; right:10px;
+    background:none; border:none; color:var(--ink-soft); cursor:pointer; font-size:13px;
+    text-decoration:underline;
+  }
+
   /* ---------- acciones finales ---------- */
   .final-card{
     background:var(--paper); border-radius:14px; box-shadow:var(--shadow);
@@ -216,10 +230,11 @@
     .hero img.logo{ height:260px; }
     .actions{ flex-direction:column; }
     .btn{ width:100%; }
+    .field-row{ flex-direction:column; gap:0; }
   }
 
   @media print{
-    .topbar, .actions, .add-entry-btn, .fa-remove, .autosave-flag{ display:none !important; }
+    .topbar, .actions, .add-entry-btn, .fa-remove, .fam-remove, .autosave-flag{ display:none !important; }
     body{ background:#fff; }
     .card, .final-card, .confid{ box-shadow:none; border-color:#999 !important; }
     input, textarea{ border:1px solid #999 !important; }
@@ -284,11 +299,16 @@ const SECTIONS = [
       {id:"q1", label:"Nombre completo", type:"text"},
       {id:"q4", label:"Fecha de nacimiento", type:"date"},
       {id:"q3", label:"Edad", type:"text", readonly:true, hint:"Se calcula sola a partir de tu fecha de nacimiento."},
+      {type:"row", fields:[
+        {id:"qpais", label:"País de residencia", type:"text"},
+        {id:"qciudad", label:"Ciudad de residencia", type:"text"},
+      ]},
       {id:"q5", label:"Sexo / género con el que te identificas", type:"text"},
       {id:"q6", label:"Estado civil", type:"text"},
       {id:"q7", label:"Ocupación actual", type:"text"},
       {id:"q8", label:"Nivel de estudios alcanzado", type:"text"},
       {id:"q9", label:"¿Con quién vives actualmente?", type:"text"},
+      {id:"family_group", type:"family", label:"Familia y personas significativas para el consultante"},
       {id:"q10", label:"Nombre y teléfono de una persona de contacto en caso de emergencia", type:"text"},
     ]},
   { id:"s1", letter:"1", title:"Motivo de consulta", color:"var(--coral)",
@@ -380,10 +400,19 @@ const FA_LABELS = [
   {key:"consecuencia", label:"Consecuencia (¿qué pasó después?)"},
 ];
 
+const FAM_LABELS = [
+  {key:"nombre", label:"Nombre"},
+  {key:"edad", label:"Edad"},
+  {key:"ocupacion", label:"Ocupación"},
+  {key:"parentesco", label:"Parentesco"},
+];
+
 const STORAGE_KEY = "ajna_cuestionario_respuestas_v1";
 const FA_COUNT_KEY = "ajna_cuestionario_fa_count_v1";
+const FAM_COUNT_KEY = "ajna_cuestionario_fam_count_v1";
 
 let faEntryCount = parseInt(localStorage.getItem(FA_COUNT_KEY) || "2", 10);
+let famEntryCount = parseInt(localStorage.getItem(FAM_COUNT_KEY) || "1", 10);
 
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
@@ -394,6 +423,15 @@ function el(tag, attrs = {}, children = []) {
   }
   children.forEach(c => node.appendChild(c));
   return node;
+}
+
+function flattenFields(fields) {
+  const out = [];
+  fields.forEach(f => {
+    if (f.type === "row") out.push(...f.fields);
+    else out.push(f);
+  });
+  return out;
 }
 
 function buildField(f, colorVar) {
@@ -445,6 +483,12 @@ function buildField(f, colorVar) {
   return wrap;
 }
 
+function buildFieldRow(f, colorVar) {
+  const row = el("div", { class: "field-row" });
+  f.fields.forEach(sub => row.appendChild(buildField(sub, colorVar)));
+  return row;
+}
+
 // ---------- fecha de hoy y edad automáticas ----------
 function todayLocalStr() {
   const d = new Date();
@@ -483,16 +527,12 @@ function autoGrow(ta) {
   ta.style.height = (ta.scrollHeight + 2) + "px";
 }
 
-function buildFunctionalEntry(index, colorVar) {
+function buildFunctionalEntry(index, colorVar, onRemove) {
   const entry = el("div", { class: "fa-entry", "data-entry": index });
   entry.appendChild(el("div", { class: "fa-title" }, [document.createTextNode(`Situación ${index + 1}`)]));
   if (index > 0) {
     const removeBtn = el("button", { type: "button", class: "fa-remove" }, [document.createTextNode("Quitar")]);
-    removeBtn.addEventListener("click", () => {
-      entry.remove();
-      faEntryCount = document.querySelectorAll(".fa-entry").length;
-      localStorage.setItem(FA_COUNT_KEY, faEntryCount);
-    });
+    removeBtn.addEventListener("click", () => onRemove(index));
     entry.appendChild(removeBtn);
   }
   FA_LABELS.forEach(l => {
@@ -501,6 +541,74 @@ function buildFunctionalEntry(index, colorVar) {
     entry.appendChild(f);
   });
   return entry;
+}
+
+function buildFamilyEntry(index, colorVar, onRemove) {
+  const entry = el("div", { class: "fam-entry", "data-entry": index });
+  entry.appendChild(el("div", { class: "fam-title" }, [document.createTextNode(`Persona ${index + 1}`)]));
+  if (index > 0) {
+    const removeBtn = el("button", { type: "button", class: "fam-remove" }, [document.createTextNode("Quitar")]);
+    removeBtn.addEventListener("click", () => onRemove(index));
+    entry.appendChild(removeBtn);
+  }
+  FAM_LABELS.forEach(l => {
+    const fieldId = `fam_${index}_${l.key}`;
+    const f = buildField({ id: fieldId, label: l.label, type: "text" }, colorVar);
+    entry.appendChild(f);
+  });
+  return entry;
+}
+
+function buildFamilyField(f, colorVar) {
+  const wrap = el("div", { class: "field", style: `--accent:${colorVar}` });
+  wrap.appendChild(el("label", {}, [document.createTextNode(f.label)]));
+  const entriesWrap = el("div", { id: "famEntries" });
+
+  // reconstruye todas las entradas con índices consecutivos (0..n-1), evitando que
+  // datos de una entrada eliminada "reaparezcan" en otra tras recargar la página
+  function reindex(excludeIndex) {
+    const entries = Array.from(entriesWrap.querySelectorAll(".fam-entry"));
+    const survivors = entries
+      .filter(entry => parseInt(entry.getAttribute("data-entry"), 10) !== excludeIndex)
+      .map(entry => {
+        const idx = entry.getAttribute("data-entry");
+        const data = {};
+        FAM_LABELS.forEach(l => {
+          const node = document.getElementById(`fam_${idx}_${l.key}`);
+          data[l.key] = node ? node.value : "";
+        });
+        return data;
+      });
+    const store = loadStore();
+    Object.keys(store).forEach(k => { if (k.startsWith("fam_")) delete store[k]; });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+    entriesWrap.innerHTML = "";
+    survivors.forEach((data, i) => {
+      entriesWrap.appendChild(buildFamilyEntry(i, colorVar, reindex));
+      FAM_LABELS.forEach(l => {
+        const node = document.getElementById(`fam_${i}_${l.key}`);
+        if (node) { node.value = data[l.key]; saveField(`fam_${i}_${l.key}`, data[l.key]); }
+      });
+    });
+    famEntryCount = survivors.length;
+    localStorage.setItem(FAM_COUNT_KEY, famEntryCount);
+    updatePetals();
+  }
+
+  for (let i = 0; i < famEntryCount; i++) {
+    entriesWrap.appendChild(buildFamilyEntry(i, colorVar, reindex));
+  }
+  wrap.appendChild(entriesWrap);
+  const addBtn = el("button", { type: "button", class: "add-entry-btn" }, [document.createTextNode("+ Agregar otra persona")]);
+  addBtn.addEventListener("click", () => {
+    const idx = entriesWrap.querySelectorAll(".fam-entry").length;
+    entriesWrap.appendChild(buildFamilyEntry(idx, colorVar, reindex));
+    famEntryCount = idx + 1;
+    localStorage.setItem(FAM_COUNT_KEY, famEntryCount);
+    restoreValues();
+  });
+  wrap.appendChild(addBtn);
+  return wrap;
 }
 
 function renderForm() {
@@ -525,22 +633,61 @@ function renderForm() {
         "Piensa en una o varias ocasiones recientes en las que se presentó tu dificultad, y describe con el mayor detalle posible cada parte."
       )]));
       const entriesWrap = el("div", { id: "faEntries" });
+
+      // reconstruye todas las entradas con índices consecutivos al quitar una,
+      // evitando que datos de una entrada eliminada reaparezcan tras recargar
+      function reindexFA(excludeIndex) {
+        const entries = Array.from(entriesWrap.querySelectorAll(".fa-entry"));
+        const survivors = entries
+          .filter(entry => parseInt(entry.getAttribute("data-entry"), 10) !== excludeIndex)
+          .map(entry => {
+            const idx = entry.getAttribute("data-entry");
+            const data = {};
+            FA_LABELS.forEach(l => {
+              const node = document.getElementById(`fa_${idx}_${l.key}`);
+              data[l.key] = node ? node.value : "";
+            });
+            return data;
+          });
+        const store = loadStore();
+        Object.keys(store).forEach(k => { if (k.startsWith("fa_")) delete store[k]; });
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+        entriesWrap.innerHTML = "";
+        survivors.forEach((data, i) => {
+          entriesWrap.appendChild(buildFunctionalEntry(i, sec.color, reindexFA));
+          FA_LABELS.forEach(l => {
+            const node = document.getElementById(`fa_${i}_${l.key}`);
+            if (node) { node.value = data[l.key]; saveField(`fa_${i}_${l.key}`, data[l.key]); }
+          });
+        });
+        faEntryCount = survivors.length;
+        localStorage.setItem(FA_COUNT_KEY, faEntryCount);
+        updatePetals();
+      }
+
       for (let i = 0; i < faEntryCount; i++) {
-        entriesWrap.appendChild(buildFunctionalEntry(i, sec.color));
+        entriesWrap.appendChild(buildFunctionalEntry(i, sec.color, reindexFA));
       }
       card.appendChild(entriesWrap);
       const addBtn = el("button", { type: "button", class: "add-entry-btn" }, [document.createTextNode("+ Agregar otra situación")]);
       addBtn.addEventListener("click", () => {
-        const wrap = document.getElementById("faEntries");
-        const idx = wrap.querySelectorAll(".fa-entry").length;
-        wrap.appendChild(buildFunctionalEntry(idx, sec.color));
+        const idx = entriesWrap.querySelectorAll(".fa-entry").length;
+        entriesWrap.appendChild(buildFunctionalEntry(idx, sec.color, reindexFA));
         faEntryCount = idx + 1;
         localStorage.setItem(FA_COUNT_KEY, faEntryCount);
         restoreValues();
       });
       card.appendChild(addBtn);
     } else {
-      sec.fields.forEach(f => card.appendChild(buildField(f, sec.color)));
+      sec.fields.forEach(f => {
+        if (f.type === "family") {
+          card.appendChild(buildFamilyField(f, sec.color));
+        } else if (f.type === "row") {
+          card.appendChild(buildFieldRow(f, sec.color));
+        } else {
+          card.appendChild(buildField(f, sec.color));
+        }
+      });
     }
 
     form.appendChild(card);
@@ -639,7 +786,20 @@ function compileText() {
         lines.push("");
       });
     } else {
-      sec.fields.forEach(f => {
+      flattenFields(sec.fields).forEach(f => {
+        if (f.type === "family") {
+          lines.push(f.label);
+          const famEntries = document.querySelectorAll(".fam-entry");
+          famEntries.forEach((entry, i) => {
+            lines.push(`  Persona ${i + 1}:`);
+            FAM_LABELS.forEach(l => {
+              const val = store[`fam_${i}_${l.key}`] || "(sin responder)";
+              lines.push(`    ${l.label}: ${val}`);
+            });
+          });
+          lines.push("");
+          return;
+        }
         const val = store[f.id];
         const display = (val === undefined || val === "") ? "(sin responder)" : val;
         lines.push(`${f.label}`);
@@ -688,7 +848,20 @@ function buildWordDocument() {
         });
       });
     } else {
-      sec.fields.forEach(f => {
+      flattenFields(sec.fields).forEach(f => {
+        if (f.type === "family") {
+          body += `<p class="q"><b>${escapeHtml(f.label)}</b></p>`;
+          const famEntries = document.querySelectorAll(".fam-entry");
+          famEntries.forEach((entry, i) => {
+            body += `<p class="q">Persona ${i + 1}</p>`;
+            FAM_LABELS.forEach(l => {
+              const val = store[`fam_${i}_${l.key}`];
+              const display = (val === undefined || val === "") ? "(sin responder)" : val;
+              body += `<p class="a">${escapeHtml(l.label)}: ${escapeHtml(display)}</p>`;
+            });
+          });
+          return;
+        }
         const val = store[f.id];
         const display = (val === undefined || val === "") ? "(sin responder)" : val;
         body += `<p class="q">${escapeHtml(f.label)}</p><p class="a">${escapeHtml(display)}</p>`;
@@ -795,7 +968,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (confirm("¿Seguro que quieres vaciar todas tus respuestas? Esta acción no se puede deshacer.")) {
       localStorage.removeItem(STORAGE_KEY);
       localStorage.removeItem(FA_COUNT_KEY);
+      localStorage.removeItem(FAM_COUNT_KEY);
       faEntryCount = 2;
+      famEntryCount = 1;
       renderForm();
       setTodayDate();
       recalcAge();
